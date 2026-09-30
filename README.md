@@ -45,7 +45,7 @@ Change a dotfile in `~/vps`, commit, push; on the other servers `vps update` pic
 | `shell` | zsh plugins, starship, mcfly, login shell → zsh |
 | `git` | falls back to plain `less` if delta is missing) |
 | `bun` / `claude` / `codex` | the CLIs; Codex uses the static release binary, no Node needed |
-| `docker` | Docker Engine, log rotation, docker group |
+| `docker` | Docker Engine, log rotation, docker group, lazydocker, weekly `docker system prune` timer (never volumes; `DOCKER_PRUNE=false` to skip) |
 | `apps` | clones the repo in `APPS_REPO` (if set) and installs its `apps` CLI |
 
 A failing module does not stop the run; `vps apply` lists what failed and how to retry.
@@ -57,6 +57,8 @@ A failing module does not stop the run; `vps apply` lists what failed and how to
 ## Things to know
 
 - **Docker bypasses ufw.** A published port (`-p 8080:80`) is open to the world no matter what `ufw status` says. Bind to `127.0.0.1` or go through the reverse proxy.
+- **Backup monitoring:** set `BACKUP_PATH` (and `BACKUP_MAX_AGE_HOURS`, default 26) in your profile; `vps audit` fails if the newest file there is too old.
+- **Claude on the server** gets `~/.claude/CLAUDE.md` (server rules) and deny/ask permissions for destructive commands from `dotfiles/claude/`.
 - **Security updates are automatic, reboots are not** (`AUTO_REBOOT=false`). `vps audit` warns when a reboot is pending.
 - **Nothing secret lives here.** SSH private keys, Claude/Codex logins and `.env` files stay on each server; `apps backup` covers app state.
 - `AUTHORIZED_KEYS_URL` trusts every key on that GitHub account. Remove old keys from GitHub when you retire a device (and from `~/.ssh/authorized_keys`, which this repo only appends to).

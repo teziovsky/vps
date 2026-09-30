@@ -90,6 +90,22 @@ link_file() {
   ok "linked $dst"
 }
 
+# The synced dotfiles as "source destination" lines. Used by modules/12-dotfiles.sh and `vps links`.
+dotfile_links() {
+  local d="$VPS_ROOT/dotfiles"
+  cat <<LINKS
+$d/zshrc $HOME/.zshrc
+$d/zsh_configs $HOME/.zsh_configs
+$d/vimrc $HOME/.vimrc
+$d/gitconfig $HOME/.gitconfig
+$d/ssh_config $HOME/.ssh/config
+$d/claude/settings.json $HOME/.claude/settings.json
+$d/claude/CLAUDE.md $HOME/.claude/CLAUDE.md
+$d/claude/statusline-starship.sh $HOME/.claude/statusline-starship.sh
+$d/claude/starship-statusline.toml $HOME/.claude/starship-statusline.toml
+LINKS
+}
+
 # write_root_file <dest> <mode>   (content on stdin)
 # Returns 0 when the file changed, 1 when it was already identical.
 write_root_file() {
