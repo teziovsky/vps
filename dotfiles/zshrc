@@ -1,0 +1,10 @@
+if [[ -n "${MC_SID:-}" ]]; then
+  export skip_global_compinit=1
+
+  PS1='%n@%m:%~%# '
+  return
+fi
+
+ZSH_CONFIG="$HOME/.zsh_configs"
+[ -f "$ZSH_CONFIG/init.zsh" ] && source "$ZSH_CONFIG/init.zsh"
+

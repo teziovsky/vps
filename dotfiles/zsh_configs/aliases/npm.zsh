@@ -1,0 +1,7 @@
+alias nrs="nr start -s"
+alias nrd="nr dev"
+alias nrb="nr build"
+alias nrf="nr fix"
+alias nrt="nr test"
+alias npm-prune="rm -rf ./node_modules ./package-lock.json ./pnpm-lock.yaml ./yarn.lock ./bun.lockb ./bun.lock ./dist ./out ./next ./build ./.output"
+alias ncu="ncu -ui"

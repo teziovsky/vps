@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# vps — keep this server configured, hardened and up to date.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+export VPS_ROOT="$(dirname "$SELF")"
+# shellcheck source=lib/common.sh
+source "$VPS_ROOT/lib/common.sh"
+
+usage() {
+  cat <<USAGE
+Usage: vps <command>
+
+  apply [module...]   run the profile's modules (or only the named ones); safe to repeat
+  audit               check security and health; exit 1 on any failure
+  update              apt upgrade, bun/claude/codex/plugins, then pull this repo and re-apply
+  list                modules and whether the profile enables them
+  profile [name]      show the active profile, or switch to another one
+
+Profile: $VPS_PROFILE   (hosts/*.env; override per machine in $VPS_STATE_DIR/local.env)
+USAGE
+}
+
+all_modules() {
+  local f
+  for f in "$VPS_ROOT"/modules/*.sh; do
+    f="${f##*/}"; f="${f#*-}"; echo "${f%.sh}"
+  done
+}
+
+module_file() {
+  local f
+  for f in "$VPS_ROOT"/modules/*-"$1".sh; do
+    [[ -f "$f" ]] && { echo "$f"; return 0; }
+  done
+  return 1
+}
+
+cmd_apply() {
+  local -a mods=("$@") failed=()
+  ((${#mods[@]})) || read -ra mods <<<"$MODULES"
+  mkdir -p "$VPS_STATE_DIR" "$HOME/.local/bin"
+  ln -sfn "$SELF" "$HOME/.local/bin/vps"
+  [[ -f "$VPS_STATE_DIR/profile" ]] || echo "$VPS_PROFILE" >"$VPS_STATE_DIR/profile"
+
+  # Sort into module order no matter how they were typed.
+  local m file
+  local -a ordered=()
+  for file in "$VPS_ROOT"/modules/*.sh; do
+    m="${file##*/}"; m="${m#*-}"; m="${m%.sh}"
+    [[ " ${mods[*]} " == *" $m "* ]] && ordered+=("$m")
+  done
+  for m in "${mods[@]}"; do
+    module_file "$m" >/dev/null || die "unknown module: $m (see: vps list)"
+  done
+
+  export VPS_RUN_TS
+  VPS_RUN_TS="$(date +%Y%m%d-%H%M%S)"
+  if ((EUID != 0)) && ! sudo -n true 2>/dev/null; then
+    log "sudo password needed for system changes"
+    sudo -v
+  fi
+
+  for m in "${ordered[@]}"; do
+    log "$m"
+    if ! bash "$(module_file "$m")"; then
+      failed+=("$m")
+      warn "module $m failed, continuing"
+    fi
+  done
+
+  echo
+  if ((${#failed[@]})); then
+    warn "failed modules: ${failed[*]}  (re-run: vps apply ${failed[*]})"
+    return 1
+  fi
+  log "done — profile $VPS_PROFILE, ${#ordered[@]} modules"
+  [[ -f /var/run/reboot-required ]] && warn "reboot required"
+  return 0
+}
+
+cmd_list() {
+  local m
+  for m in $(all_modules); do
+    if module_enabled "$m"; then printf '  %-14s on\n' "$m"; else printf '  %-14s off\n' "$m"; fi
+  done
+}
+
+cmd_profile() {
+  if [[ $# -eq 0 ]]; then echo "$VPS_PROFILE"; return; fi
+  [[ -f "$VPS_ROOT/hosts/$1.env" || "$1" == default ]] || die "no profile hosts/$1.env"
+  mkdir -p "$VPS_STATE_DIR"
+  echo "$1" >"$VPS_STATE_DIR/profile"
+  echo "profile is now $1"
+}
+
+cmd_update() {
+  log "apt"
+  as_root apt-get update -qq
+  as_root env DEBIAN_FRONTEND=noninteractive apt-get -y -qq upgrade
+  as_root apt-get -y -qq autoremove >/dev/null
+  if have bun; then log "bun";    bun upgrade 2>&1 | tail -1 || true; bun update -g --latest 2>&1 | tail -3 || true; fi
+  if have claude; then log "claude"; claude update 2>&1 | tail -2 || true; fi
+  log "codex";  bash "$VPS_ROOT/modules/72-codex.sh" || true
+  local p
+  for p in "$VPS_ROOT"/dotfiles/zsh_configs/plugins/*/; do
+    [[ -d "$p/.git" ]] && git -C "$p" pull --ff-only -q || true
+  done
+  log "vps repo"
+  if git -C "$VPS_ROOT" pull --ff-only -q; then
+    exec "$SELF" apply
+  fi
+  warn "repo not fast-forwardable (local changes?); skipped apply"
+  [[ -f /var/run/reboot-required ]] && warn "reboot required"
+  return 0
+}
+
+cmd_audit() {
+  local fails=0 warns=0
+  pass() { printf '  \033[32mpass\033[0m  %s\n' "$*"; }
+  bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; fails=$((fails + 1)); }
+  meh()  { printf '  \033[33mwarn\033[0m  %s\n' "$*"; warns=$((warns + 1)); }
+  # check <module> <description> <command...>: FAIL when the module is enabled, warn otherwise
+  check() {
+    local mod="$1" what="$2"; shift 2
+    if "$@" >/dev/null 2>&1; then pass "$what"
+    elif module_enabled "$mod"; then bad "$what"
+    else meh "$what (module $mod is off)"; fi
+  }
+  # Capture first: `sshd -T | grep -q` dies of SIGPIPE under pipefail.
+  sshd_is() { local cfg; cfg="$(as_root sshd -T 2>/dev/null)" || return 1; grep -qix "$1 $2" <<<"$cfg"; }
+
+  log "audit: $(hostname) / profile $VPS_PROFILE"
+  check ssh-harden "sshd: password login disabled" sshd_is passwordauthentication no
+  check ssh-harden "sshd: root login disabled" sshd_is permitrootlogin "${SSH_PERMIT_ROOT}"
+  check firewall   "ufw active" bash -c 'as_root() { if ((EUID==0)); then "$@"; else sudo "$@"; fi; }; as_root ufw status | grep -q "Status: active"'
+  check fail2ban   "fail2ban running" systemctl is-active --quiet fail2ban
+  check auto-updates "unattended upgrades scheduled" systemctl is-enabled --quiet apt-daily-upgrade.timer
+  check base       "clock synchronised" bash -c '[[ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" == yes ]]'
+
+  local pending sec
+  pending="$(apt-get -s upgrade 2>/dev/null | grep -c '^Inst' || true)"
+  sec="$(apt-get -s upgrade 2>/dev/null | grep '^Inst' | grep -ci security || true)"
+  if ((sec > 0)); then bad "$sec security updates pending (vps update)"
+  elif ((pending > 0)); then meh "$pending updates pending (vps update)"
+  else pass "no pending updates"; fi
+
+  if [[ -f /var/run/reboot-required ]]; then meh "reboot required"; else pass "no reboot pending"; fi
+
+  local use
+  use="$(df --output=pcent / | tail -1 | tr -dc 0-9)"
+  if ((use >= 90)); then bad "root disk ${use}% full"
+  elif ((use >= 80)); then meh "root disk ${use}% full"
+  else pass "root disk ${use}% used"; fi
+
+  local failed_units
+  failed_units="$(systemctl --failed --no-legend 2>/dev/null | awk '{print $2}' | paste -sd' ' - || true)"
+  if [[ -n "$failed_units" ]]; then bad "failed units: $failed_units"; else pass "no failed systemd units"; fi
+
+  if have docker && docker info >/dev/null 2>&1; then
+    local unhealthy
+    unhealthy="$(docker ps --filter health=unhealthy --format '{{.Names}}' | paste -sd' ' - || true)"
+    if [[ -n "$unhealthy" ]]; then bad "unhealthy containers: $unhealthy"; else pass "no unhealthy containers"; fi
+  fi
+
+  log "listening on a public address (review):"
+  { ss -tlnH 2>/dev/null || true; } | awk '$4 !~ /^(127\.|\[::1\]|\[::ffff:127)/ {print "    " $4}' | sort -u
+
+  echo
+  if ((fails)); then warn "$fails failed, $warns warnings"; return 1; fi
+  log "no failures, $warns warnings"
+}
+
+case "${1:-}" in
+  apply)   shift; cmd_apply "$@" ;;
+  audit)   cmd_audit ;;
+  update)  cmd_update ;;
+  list)    cmd_list ;;
+  profile) shift; cmd_profile "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) usage >&2; exit 2 ;;
+esac

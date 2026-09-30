@@ -1,0 +1,12 @@
+alias g="git"
+alias ga="g a ."
+alias gac="g a . && g c"
+alias gb="g b"
+alias gcb="g cb"
+alias gcbn="g cbn"
+alias gcbd="g cbd"
+alias gcbm="g cbm"
+alias gc="g c"
+alias gs="g s"
+alias gp="g p"
+

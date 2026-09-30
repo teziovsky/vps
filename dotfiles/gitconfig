@@ -1,0 +1,79 @@
+[alias]
+a = add .
+ac = commit -am
+b = branch
+cb = "!f() { git checkout $*; } ; f"
+cbn = "!f() { git checkout -b $*; } ; f"
+cbd = checkout develop
+cbm = checkout main
+c = commit
+d = diff
+f = fetch
+go = "!f() { git checkout -b \"$1\" 2> /dev/null || git checkout \"$1\"; }; f"
+l = log
+p = pull --recurse-submodules
+push = push
+s = status
+ss = status -s
+
+# Undo last commit
+undo = reset HEAD^
+
+# View abbreviated SHA, description, and history graph of the latest 20 commits.
+log20 = log --pretty=oneline -n 20 --graph --abbrev-commit
+
+# Interactive rebase with the given number of latest commits.
+reb = "!r() { git rebase -i HEAD~$1; }; r"
+
+# Show the user email for the current repository.
+whoami = config user.email
+
+aliases = config --get-regexp alias
+ignore = "!f() { git rm --cached 'git ls-files -i -c --exclude-from=.gitignore'; } ; f"
+
+branches = branch --all
+gone = "!f() { git fetch -p && git branch -vv | grep 'origin/.*: gone]' | awk '{print $1}' | xargs git branch -D; } ; f"
+squash = "!f() { git reset --soft HEAD~$1 && git commit -m '$2'; }; f"
+
+
+remoteupdate = remote update --prune
+contributors = shortlog --summary --numbered
+remotes = remote --verbose
+tags = tag -l
+[color]
+# Use colors in Git commands that are capable of colored output when
+# outputting to the terminal. (This is the default setting in Git ≥ 1.8.4.)
+ui = auto
+[core]
+autocrlf = input
+editor = vim
+pager = delta
+	ignorecase = false
+[interactive]
+diffFilter = delta --color-only
+[add.interactive]
+useBuiltin = false
+[delta]
+navigate = true
+light = false
+[merge]
+conflictstyle = diff3
+[diff]
+colorMoved = default
+[init]
+defaultBranch = main
+[push]
+default = current
+followTags = true
+autoSetupRemote = true
+[pull]
+default = current
+[branch]
+sort = -committerdate
+[pager]
+branch = false
+[user]
+email = teziovsky@gmail.com
+name = Jakub Soboczyński
+[include]
+path = ~/.gitconfig.local

@@ -1,0 +1,3 @@
+# plugin clones are fetched by the shell module
+dotfiles/zsh_configs/plugins/*/
+*.local.env

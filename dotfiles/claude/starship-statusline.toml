@@ -1,0 +1,3 @@
+# Starship config used only by the Claude Code status line.
+format = "$directory$git_branch"
+add_newline = false
