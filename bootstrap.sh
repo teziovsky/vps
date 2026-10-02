@@ -44,9 +44,11 @@ if [[ ! -f /etc/sudoers.d/90-vps-user ]]; then
   mv /etc/sudoers.d/90-vps-user.tmp /etc/sudoers.d/90-vps-user
 fi
 
-if [[ ! -d "$home/vps/.git" ]]; then
-  runuser -u "$VPS_USER" -- git clone -q "$VPS_REPO" "$home/vps"
-  [[ -z "$VPS_REF" ]] || runuser -u "$VPS_USER" -- git -C "$home/vps" checkout -q "$VPS_REF"
+VPS_DIR="${VPS_DIR:-/opt/vps}"
+if [[ ! -d "$VPS_DIR/.git" ]]; then
+  install -d -o "$VPS_USER" -g "$(id -gn "$VPS_USER")" "$VPS_DIR"
+  runuser -u "$VPS_USER" -- git clone -q "$VPS_REPO" "$VPS_DIR"
+  [[ -z "$VPS_REF" ]] || runuser -u "$VPS_USER" -- git -C "$VPS_DIR" checkout -q "$VPS_REF"
 fi
 
-exec runuser -u "$VPS_USER" -- env HOME="$home" VPS_USER="$VPS_USER" VPS_PROFILE="$VPS_PROFILE" VPS_MODULES="$VPS_MODULES" "$home/vps/vps" apply
+exec runuser -u "$VPS_USER" -- env HOME="$home" VPS_USER="$VPS_USER" VPS_PROFILE="$VPS_PROFILE" VPS_MODULES="$VPS_MODULES" "$VPS_DIR/vps" apply

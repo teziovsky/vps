@@ -10,13 +10,13 @@ As root on the fresh VPS (the repo must be reachable over https; it holds no sec
 curl -fsSL https://raw.githubusercontent.com/teziovsky/vps/main/bootstrap.sh | VPS_USER=<login> bash
 ```
 
-This creates the login user with root's SSH keys, clones the repo to `~/vps`, and runs `vps apply` as that user. Afterwards:
+This creates the login user with root's SSH keys, clones the repo to `/opt/vps`, and runs `vps apply` as that user. Afterwards:
 
 1. Add the printed public key (`~/.ssh/id_ed25519_github.pub`) to GitHub, then `vps apply apps` if the profile has apps.
 2. **Open a second terminal and log in as the new user before closing the root session** — sshd is now key-only and root login is off.
 3. `claude` and `codex login` once each (interactive).
 
-Existing machine: `git clone git@github.com:teziovsky/vps.git ~/vps && ~/vps/vps apply`. Your current `~/.zshrc`, `~/.zsh_configs`, `~/.vimrc`, `~/.gitconfig` are moved to `~/.vps-backup/<timestamp>/` and replaced by symlinks into this repo.
+Existing machine: `sudo install -d -o "$USER" -g "$USER" /opt/vps && git clone git@github.com:teziovsky/vps.git /opt/vps && /opt/vps/vps apply`. Your current `~/.zshrc`, `~/.zsh_configs`, `~/.vimrc`, `~/.gitconfig` are moved to `~/.vps-backup/<timestamp>/` and replaced by symlinks into this repo.
 
 ## Daily use
 
@@ -28,7 +28,7 @@ vps list             # which modules the profile enables
 vps profile <name>   # switch this machine's profile
 ```
 
-Change a dotfile in `~/vps`, commit, push; on the other servers `vps update` picks it up (they are symlinks).
+Change a dotfile in `/opt/vps`, commit, push; on the other servers `vps update` picks it up (they are symlinks).
 
 ## Modules (`modules/NN-name.sh`, run in order)
 
