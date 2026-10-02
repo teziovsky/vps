@@ -8,3 +8,6 @@ fi
 ZSH_CONFIG="$HOME/.zsh_configs"
 [ -f "$ZSH_CONFIG/init.zsh" ] && source "$ZSH_CONFIG/init.zsh"
 
+
+# bun completions
+[ -s "/home/jakub/.bun/_bun" ] && source "/home/jakub/.bun/_bun"
