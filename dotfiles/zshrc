@@ -11,3 +11,6 @@ ZSH_CONFIG="$HOME/.zsh_configs"
 
 # bun completions
 [ -s "/home/jakub/.bun/_bun" ] && source "/home/jakub/.bun/_bun"
+
+# Hermes Agent command
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
