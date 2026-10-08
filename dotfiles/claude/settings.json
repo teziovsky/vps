@@ -86,7 +86,7 @@
     }
   },
   "advisorModel": "opus",
-  "tui": "default",
+  "tui": "fullscreen",
   "theme": "dark",
   "preferredNotifChannel": "auto",
   "inputNeededNotifEnabled": true,
