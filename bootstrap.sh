@@ -51,4 +51,9 @@ if [[ ! -d "$VPS_DIR/.git" ]]; then
   [[ -z "$VPS_REF" ]] || runuser -u "$VPS_USER" -- git -C "$VPS_DIR" checkout -q "$VPS_REF"
 fi
 
+# Nothing chosen and a terminal is available: let the user pick modules interactively.
+if [[ -z "$VPS_PROFILE$VPS_MODULES" ]] && [[ -t 1 ]] && { : </dev/tty; } 2>/dev/null; then
+  exec runuser -u "$VPS_USER" -- env HOME="$home" VPS_USER="$VPS_USER" "$VPS_DIR/vps" init </dev/tty
+fi
+
 exec runuser -u "$VPS_USER" -- env HOME="$home" VPS_USER="$VPS_USER" VPS_PROFILE="$VPS_PROFILE" VPS_MODULES="$VPS_MODULES" "$VPS_DIR/vps" apply

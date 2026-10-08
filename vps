@@ -12,11 +12,13 @@ usage() {
 Usage: vps <command>
 
   apply [module...]   run the profile's modules (or only the named ones); safe to repeat
+                      add --dry-run to preview the plan without changing anything
   audit               check security and health; exit 1 on any failure
   update              apt upgrade, bun/claude/codex/plugins, then pull this repo and re-apply
   links               check the dotfile symlinks; relink any that are missing or wrong
   list                modules and whether the profile enables them
   profile [name]      show the active profile, or switch to another one
+  init [--dry-run]    interactive wizard: pick modules with checkboxes, save as a profile
 
 Profile: $VPS_PROFILE   (hosts/*.env; override per machine in $VPS_STATE_DIR/local.env)
 USAGE
@@ -37,12 +39,39 @@ module_file() {
   return 1
 }
 
+# Read-only preview of what `apply` would do: order, descriptions, and whether a module would skip itself.
+plan_note() {  # <module> -> a short hint on stdout (may be empty)
+  case "$1" in
+    tailscale) have tailscale || { echo "tailscale not installed: will skip"; return; }
+               as_root tailscale status >/dev/null 2>&1 || { echo "not logged in: will skip"; return; }
+               echo "Tailscale SSH -> ${TAILSCALE_SSH:-true}" ;;
+    apps)      [[ -n "${APPS_REPO:-}" ]] || { echo "APPS_REPO empty: will skip"; return; }
+               [[ -d "$APPS_DIR/.git" ]] && echo "pull $APPS_DIR" || echo "clone $APPS_REPO -> $APPS_DIR" ;;
+    docker)    have docker && echo "already installed" || echo "will install Docker Engine" ;;
+    hermes)    [[ -f "$HOME/.config/systemd/user/hermes-gateway.service" ]] || echo "no hermes-gateway unit: will skip" ;;
+    firewall)  echo "allow tcp: ${FIREWALL_ALLOW_TCP:-none}, udp: ${FIREWALL_ALLOW_UDP:-none}" ;;
+    ssh-harden) echo "users: ${SSH_ALLOW_USERS:-?}, root login: ${SSH_PERMIT_ROOT:-no}" ;;
+    base)      echo "timezone $TIMEZONE, swap ${SWAP_MB}MB" ;;
+  esac
+}
+
+print_plan() {  # <module>... (already ordered)
+  local m note
+  log "dry run: profile $VPS_PROFILE, ${#} modules, nothing is changed"
+  for m in "$@"; do
+    note="$(plan_note "$m" 2>/dev/null || true)"
+    printf '  %-14s %s%s\n' "$m" "${MOD_DESC[$m]:-}" "${note:+  [$note]}"
+  done
+  echo "  not run:" $(comm -23 <(all_modules | sort) <(printf '%s\n' "$@" | sort))
+}
+
 cmd_apply() {
-  local -a mods=("$@") failed=()
+  local dry=0 a
+  local -a mods=() failed=()
+  for a in "$@"; do
+    case "$a" in -n|--dry-run) dry=1 ;; *) mods+=("$a") ;; esac
+  done
   ((${#mods[@]})) || read -ra mods <<<"$MODULES"
-  mkdir -p "$VPS_STATE_DIR" "$HOME/.local/bin"
-  ln -sfn "$SELF" "$HOME/.local/bin/vps"
-  [[ -f "$VPS_STATE_DIR/profile" ]] || echo "$VPS_PROFILE" >"$VPS_STATE_DIR/profile"
 
   # Sort into module order no matter how they were typed.
   local m file
@@ -54,6 +83,15 @@ cmd_apply() {
   for m in "${mods[@]}"; do
     module_file "$m" >/dev/null || die "unknown module: $m (see: vps list)"
   done
+
+  if ((dry)); then print_plan "${ordered[@]}"; return 0; fi
+
+  mkdir -p "$VPS_STATE_DIR" "$HOME/.local/bin"
+  ln -sfn "$SELF" "$HOME/.local/bin/vps"
+  if [[ ! -f "$VPS_STATE_DIR/profile" ]]; then
+    [[ -t 0 && -z "${VPS_MODULES:-}" ]] && warn "no profile chosen yet; 'vps init' lets you pick modules interactively"
+    echo "$VPS_PROFILE" >"$VPS_STATE_DIR/profile"
+  fi
 
   export VPS_RUN_TS
   VPS_RUN_TS="$(date +%Y%m%d-%H%M%S)"
@@ -104,10 +142,158 @@ cmd_links() {
 
 cmd_profile() {
   if [[ $# -eq 0 ]]; then echo "$VPS_PROFILE"; return; fi
-  [[ -f "$VPS_ROOT/hosts/$1.env" || "$1" == default ]] || die "no profile hosts/$1.env"
+  [[ -f "$VPS_ROOT/hosts/$1.env" || -f "$VPS_STATE_DIR/hosts/$1.env" || "$1" == default ]] \
+    || die "no profile $1 (looked in hosts/ and $VPS_STATE_DIR/hosts/)"
   mkdir -p "$VPS_STATE_DIR"
   echo "$1" >"$VPS_STATE_DIR/profile"
   echo "profile is now $1"
+}
+
+# ---- init wizard ------------------------------------------------------------
+declare -A MOD_DESC=(
+  [base]="Packages, timezone, locale, optional swap"
+  [dotfiles]="Symlink dotfiles from this repo into ~"
+  [ssh-client]="SSH key for this server + authorized_keys"
+  [ssh-harden]="Key-only SSH login, no root (refuses to lock you out)"
+  [tailscale]="Tailscale SSH (needs tailscale installed and logged in)"
+  [firewall]="ufw: deny incoming except SSH and web ports"
+  [fail2ban]="Ban hosts that hammer sshd"
+  [auto-updates]="Unattended security updates"
+  [lxc-units]="Mask systemd units that cannot run in LXC"
+  [sysctl]="Kernel network and memory hardening"
+  [shell]="zsh, starship, mcfly; zsh as login shell"
+  [git]="Per-machine git tweaks"
+  [bun]="Bun runtime"
+  [claude]="Claude Code CLI"
+  [codex]="OpenAI Codex CLI"
+  [hermes]="Isolate the Hermes gateway (systemd drop-in)"
+  [docker]="Docker Engine with log rotation + weekly prune"
+  [apps]="Clone your apps repo and install its CLI"
+)
+
+# gum (Bubble Tea) single static binary -> ~/.local/bin. Checksum-verified; plain prompts if it cannot be had.
+GUM_VERSION=2.0.2
+ensure_gum() {
+  have gum && return 0
+  local arch tmp
+  case "$(uname -m)" in x86_64) arch=x86_64 ;; aarch64|arm64) arch=arm64 ;; *) return 1 ;; esac
+  tmp="$(mktemp -d)"
+  local base="https://github.com/charmbracelet/gum/releases/download/v$GUM_VERSION"
+  local tgz="gum_${GUM_VERSION}_Linux_${arch}.tar.gz"
+  if curl -fsSL "$base/$tgz" -o "$tmp/$tgz" && curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt" \
+     && (cd "$tmp" && awk -v f="$tgz" '$2 == f' checksums.txt | sha256sum -c - >/dev/null 2>&1) \
+     && tar -xzf "$tmp/$tgz" -C "$tmp" --wildcards '*/gum' --strip-components=1 \
+     && install -D -m 755 "$tmp/gum" "$HOME/.local/bin/gum"; then
+    rm -rf "$tmp"; ok "installed gum $GUM_VERSION"
+  else
+    rm -rf "$tmp"; warn "could not install gum; using plain prompts"; return 1
+  fi
+}
+
+# UI helpers: gum when available, plain prompts otherwise. All read the terminal.
+ui_yesno() {  # <question> [default y|n]
+  if have gum; then gum confirm --default="$([[ "${2:-y}" == y ]] && echo true || echo false)" "$1"
+  else local a; read -r -p "$1 [${2:-y}] " a </dev/tty; a="${a:-${2:-y}}"; [[ "$a" =~ ^[Yy] ]]; fi
+}
+ui_input() {  # <prompt> <default> -> stdout
+  if have gum; then gum input --header "$1" --value "$2"
+  else local a; read -r -p "$1 [$2] " a </dev/tty; echo "${a:-$2}"; fi
+}
+ui_menu() {  # <title> <tag desc>... -> stdout (tag)
+  local title="$1" i items=(); shift
+  for ((i = 1; i <= $#; i += 2)); do items+=("$(printf '%-9s %s' "${!i}" "${@:i+1:1}")"); done
+  if have gum; then gum choose --header "$title" "${items[@]}" | awk '{print $1}'; [[ ${PIPESTATUS[0]} -eq 0 ]]
+  else
+    local a; echo "$title" >&2; printf '  %s\n' "${items[@]}" >&2
+    read -r -p "choose: " a </dev/tty; echo "$a"
+  fi
+}
+ui_checklist() {  # <title> <selected modules> -> stdout: chosen modules, one per line
+  local sel=" $2 " m label items=() on=()
+  for m in $(all_modules); do
+    label="$(printf '%-14s %s' "$m" "${MOD_DESC[$m]:-}")"
+    items+=("$label"); [[ "$sel" == *" $m "* ]] && on+=("$label")
+  done
+  if have gum; then
+    gum choose --no-limit --height 22 --header "$1  (space toggles, enter confirms)" \
+      --selected="$(IFS=,; echo "${on[*]}")" "${items[@]}" | awk '{print $1}'
+    [[ ${PIPESTATUS[0]} -eq 0 ]]
+  else
+    for m in $(all_modules); do
+      ui_yesno "$m - ${MOD_DESC[$m]:-}" "$([[ "$sel" == *" $m "* ]] && echo y || echo n)" && echo "$m" || true
+    done
+  fi
+}
+
+preset_modules() {  # <preset> -> its MODULES
+  case "$1" in
+    current) echo "$MODULES" ;;
+    *) ( source "$VPS_ROOT/hosts/default.env"; source "$VPS_ROOT/hosts/$1.env"; echo "$MODULES" ) ;;
+  esac
+}
+
+cmd_init() {
+  local dry=0; [[ "${1:-}" == -n || "${1:-}" == --dry-run ]] && dry=1
+  [[ -t 0 || -r /dev/tty ]] || die "vps init needs a terminal"
+  [[ -t 0 ]] || exec </dev/tty
+  ensure_gum || true
+  have gum && gum style --border rounded --padding "0 2" --border-foreground 212 "vps init" "pick what to install on $(hostname -s)"
+
+  local preset chosen name f
+  preset="$(ui_menu "Start from" \
+    full    "Tailscale + apps + Docker + Hermes" \
+    minimal "Hardened base, no Tailscale / apps" \
+    current "Modules of the active profile ($VPS_PROFILE)")" || die "cancelled"
+  chosen="$(ui_checklist "Modules to install on $(hostname -s)" "$(preset_modules "$preset")")" || die "cancelled"
+  chosen="$(echo $chosen)"   # one line, single-spaced
+  [[ -n "$chosen" ]] || die "no modules selected"
+
+  local m
+  for m in ssh-harden firewall; do
+    [[ " $chosen " == *" $m "* ]] || ui_yesno "'$m' is not selected. Continue without it?" n || die "cancelled"
+  done
+
+  local extra=""
+  if [[ " $chosen " == *" apps "* ]]; then
+    local repo; repo="$(ui_input "Apps repo (git URL)" "${APPS_REPO:-}")" || die "cancelled"
+    [[ -n "$repo" ]] && extra+="$(printf 'APPS_REPO=%q' "$repo")"$'\n'
+  fi
+  if [[ " $chosen " == *" tailscale "* ]]; then
+    if ui_yesno "Enable Tailscale SSH?" y; then extra+=$'TAILSCALE_SSH=true\n'; else extra+=$'TAILSCALE_SSH=false\n'; fi
+  fi
+  if [[ " $chosen " == *" firewall "* ]]; then
+    local ports; ports="$(ui_input "Extra TCP ports to open (space separated)" "$FIREWALL_ALLOW_TCP")" || die "cancelled"
+    extra+="$(printf 'FIREWALL_ALLOW_TCP=%q' "$ports")"$'\n'
+  fi
+
+  name="$(ui_input "Save as profile name" "$(hostname -s)")" || die "cancelled"
+  [[ "$name" =~ ^[A-Za-z0-9._-]+$ && "$name" != default ]] || die "bad profile name: $name"
+  f="$VPS_STATE_DIR/hosts/$name.env"
+  if ((dry)); then
+    log "dry run: would write $f and make it the active profile"
+    { echo "MODULES=\"$chosen\""; printf '%s' "$extra"; } | sed 's/^/    /'
+    local added removed
+    added="$(comm -13 <(tr ' ' '\n' <<<"$MODULES" | sort) <(tr ' ' '\n' <<<"$chosen" | sort) | paste -sd' ' -)"
+    removed="$(comm -23 <(tr ' ' '\n' <<<"$MODULES" | sort) <(tr ' ' '\n' <<<"$chosen" | sort) | paste -sd' ' -)"
+    echo "  vs active profile ($VPS_PROFILE):  +[${added:-}]  -[${removed:-}]  (removed modules are not undone)"
+    eval "$extra"   # so the plan notes reflect the wizard answers
+    print_plan $(for m in $(all_modules); do [[ " $chosen " == *" $m "* ]] && echo "$m"; done)
+    return 0
+  fi
+  mkdir -p "$VPS_STATE_DIR/hosts"
+  if [[ -f "$f" ]]; then
+    ui_yesno "Profile $name exists. Overwrite it (a .bak copy is kept)?" n || die "cancelled"
+    cp "$f" "$f.bak"
+  fi
+  { echo "# Written by 'vps init' on $(date +%F). Edit freely; re-run 'vps init' to redo."
+    echo "MODULES=\"$chosen\""
+    printf '%s' "$extra"; } >"$f"
+  echo "$name" >"$VPS_STATE_DIR/profile"
+  log "profile $name saved to $f"
+  cat "$f"
+  if ui_yesno "Run 'vps apply' now?" y; then
+    exec "$SELF" apply
+  fi
 }
 
 cmd_update() {
@@ -214,6 +400,7 @@ case "${1:-}" in
   links)   cmd_links ;;
   list)    cmd_list ;;
   profile) shift; cmd_profile "$@" ;;
+  init)    shift; cmd_init "$@" ;;
   -h|--help|help|"") usage ;;
   *) usage >&2; exit 2 ;;
 esac

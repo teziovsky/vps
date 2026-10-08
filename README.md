@@ -26,6 +26,7 @@ vps update           # apt upgrade, bun/claude/codex/plugins, git pull this repo
 vps apply [module…]  # re-run everything, or only some modules; safe to repeat
 vps list             # which modules the profile enables
 vps profile <name>   # switch this machine's profile
+vps init             # interactive wizard (checkboxes via gum): choose modules, save as a profile
 ```
 
 Change a dotfile in `/opt/vps`, commit, push; on the other servers `vps update` picks it up (they are symlinks).
