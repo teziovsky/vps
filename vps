@@ -48,7 +48,6 @@ plan_note() {  # <module> -> a short hint on stdout (may be empty)
     apps)      [[ -n "${APPS_REPO:-}" ]] || { echo "APPS_REPO empty: will skip"; return; }
                [[ -d "$APPS_DIR/.git" ]] && echo "pull $APPS_DIR" || echo "clone $APPS_REPO -> $APPS_DIR" ;;
     docker)    have docker && echo "already installed" || echo "will install Docker Engine" ;;
-    hermes)    [[ -f "$HOME/.config/systemd/user/hermes-gateway.service" ]] || echo "no hermes-gateway unit: will skip" ;;
     firewall)  echo "allow tcp: ${FIREWALL_ALLOW_TCP:-none}, udp: ${FIREWALL_ALLOW_UDP:-none}" ;;
     ssh-harden) echo "users: ${SSH_ALLOW_USERS:-?}, root login: ${SSH_PERMIT_ROOT:-no}" ;;
     base)      echo "timezone $TIMEZONE, swap ${SWAP_MB}MB" ;;
@@ -166,7 +165,6 @@ declare -A MOD_DESC=(
   [bun]="Bun runtime"
   [claude]="Claude Code CLI"
   [codex]="OpenAI Codex CLI"
-  [hermes]="Isolate the Hermes gateway (systemd drop-in)"
   [docker]="Docker Engine with log rotation + weekly prune"
   [apps]="Clone your apps repo and install its CLI"
 )
@@ -241,7 +239,7 @@ cmd_init() {
 
   local preset chosen name f
   preset="$(ui_menu "Start from" \
-    full    "Tailscale + apps + Docker + Hermes" \
+    full    "Tailscale + apps + Docker" \
     minimal "Hardened base, no Tailscale / apps" \
     current "Modules of the active profile ($VPS_PROFILE)")" || die "cancelled"
   chosen="$(ui_checklist "Modules to install on $(hostname -s)" "$(preset_modules "$preset")")" || die "cancelled"
