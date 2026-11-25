@@ -89,5 +89,8 @@
   "theme": "dark",
   "preferredNotifChannel": "auto",
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "skillOverrides": {
+    "auto-mode-setup": "off"
+  }
 }
