@@ -14,7 +14,7 @@ Usage: vps <command>
   apply [module...]   run the profile's modules (or only the named ones); safe to repeat
                       add --dry-run to preview the plan without changing anything
   audit               check security and health; exit 1 on any failure
-  update              apt upgrade, bun/claude/codex/plugins, then pull this repo and re-apply
+  update              apt upgrade, bun/claude/plugins, then pull this repo and re-apply
   links               check the dotfile symlinks; relink any that are missing or wrong
   list                modules and whether the profile enables them
   profile [name]      show the active profile, or switch to another one
@@ -164,7 +164,6 @@ declare -A MOD_DESC=(
   [git]="Per-machine git tweaks"
   [bun]="Bun runtime"
   [claude]="Claude Code CLI"
-  [codex]="OpenAI Codex CLI"
   [docker]="Docker Engine with log rotation + weekly prune"
   [apps]="Clone your apps repo and install its CLI"
 )
@@ -301,7 +300,6 @@ cmd_update() {
   as_root apt-get -y -qq autoremove >/dev/null
   if have bun; then log "bun";    bun upgrade 2>&1 | tail -1 || true; bun update -g --latest 2>&1 | tail -3 || true; fi
   if have claude; then log "claude"; claude update 2>&1 | tail -2 || true; fi
-  log "codex";  bash "$VPS_ROOT/modules/72-codex.sh" || true
   local p
   for p in "$VPS_ROOT"/dotfiles/zsh_configs/plugins/*/; do
     [[ -d "$p/.git" ]] && git -C "$p" pull --ff-only -q || true
