@@ -64,7 +64,6 @@
       "Bash(sudo vim /etc/ssh/*)"
     ]
   },
-  "model": "sonnet",
   "enableWorkflows": true,
   "statusLine": {
     "type": "command",
@@ -79,7 +78,7 @@
   },
   "modelSettings": {
     "claude-opus-5-5": {
-      "effortLevel": "medium"
+      "effortLevel": "low"
     },
     "claude-sonnet-5-5": {
       "effortLevel": "medium"
