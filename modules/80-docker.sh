@@ -46,6 +46,20 @@ else
   ok "lazydocker present"
 fi
 
+# Containers publishing ports on the Tailscale IP fail with "cannot assign
+# requested address" if Docker starts before tailscale0 is up, and are not
+# retried. Hold Docker back (max 60s) until the Tailscale IPv4 exists.
+if have tailscale; then
+  write_root_file /etc/systemd/system/docker.service.d/10-wait-tailscale.conf 644 <<'UNIT' && as_root systemctl daemon-reload
+[Unit]
+After=tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+ExecStartPre=/bin/sh -c 'for i in $(seq 60); do tailscale ip -4 >/dev/null 2>&1 && exit 0; sleep 1; done; echo "tailscale IP not ready, starting docker anyway"'
+UNIT
+fi
+
 # Weekly prune of unused images, stopped containers and build cache older than a week.
 # Never touches volumes.
 if [[ "${DOCKER_PRUNE:-true}" == true ]]; then
